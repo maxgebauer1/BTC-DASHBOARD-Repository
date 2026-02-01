@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTC Linear Regression Strategy</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 15px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            color: #f39c12;
+        }
+
+        .signal-box {
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .signal-waiting {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            border: 2px solid #7f8c8d;
+        }
+
+        .signal-entry {
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+            border: 2px solid #27ae60;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .card-title {
+            font-size: 0.85em;
+            color: #7f8c8d;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .price-large {
+            font-size: 2em;
+            font-weight: bold;
+            color: #f39c12;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #2c3e50;
+        }
+
+        .metric-row:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: #95a5a6;
+        }
+
+        .metric-value {
+            font-weight: 600;
+        }
+
+        .r2-good { color: #2ecc71; }
+        .r2-bad { color: #e74c3c; }
+
+        .trade-levels {
+            display: none;
+        }
+
+        .trade-levels.active {
+            display: block;
+        }
+
+        .level-entry { color: #3498db; }
+        .level-sl { color: #e74c3c; }
+        .level-tp { color: #2ecc71; }
+
+        .level-box {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+            text-align: center;
+        }
+
+        .level-box .label {
+            font-size: 0.8em;
+            color: #7f8c8d;
+        }
+
+        .level-box .value {
+            font-size: 1.4em;
+            font-weight: bold;
+        }
+
+        .update-time {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 0.8em;
+            margin-top: 15px;
+        }
+
+        .error {
+            background: #e74c3c;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .strategy-info {
+            font-size: 0.75em;
+            color: #7f8c8d;
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            border-top: 1px solid #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BTC Linear Regression</h1>
+
+        <div id="error" class="error" style="display: none;"></div>
+
+        <div id="signal-box" class="signal-box signal-waiting">
+            <span id="signal-text">WAITING</span>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Current Price</div>
+            <div class="price-large">$<span id="btc-price">--</span></div>
+        </div>
+
+        <div id="trade-levels" class="trade-levels card">
+            <div class="card-title">Trade Levels</div>
+            <div class="level-box">
+                <div class="label">ENTRY</div>
+                <div class="value level-entry">$<span id="entry-price">--</span></div>
+            </div>
+            <div class="level-box">
+                <div class="label">STOP LOSS</div>
+                <div class="value level-sl">$<span id="stop-loss">--</span></div>
+            </div>
+            <div class="level-box">
+                <div class="label">TAKE PROFIT</div>
+                <div class="value level-tp">$<span id="take-profit">--</span></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Channel Status</div>
+            <div class="metric-row">
+                <span class="metric-label">R-Squared</span>
+                <span class="metric-value" id="r-squared">--</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">R² Threshold</span>
+                <span class="metric-value">> 0.6</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Channel Top</span>
+                <span class="metric-value" id="channel-top">--</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Regression Line</span>
+                <span class="metric-value" id="regression-line">--</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Entry Threshold</span>
+                <span class="metric-value" id="entry-threshold">--</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Channel Bottom</span>
+                <span class="metric-value" id="channel-bottom">--</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Current Position</span>
+                <span class="metric-value" id="cumulative-return">--</span>
+            </div>
+        </div>
+
+        <div class="update-time">
+            Last updated: <span id="last-update">--</span>
+            <br>Auto-refresh: 30 seconds
+        </div>
+
+        <div class="strategy-info">
+            Strategy: 100-period lookback | Entry: 50% to bottom | SL: 2x distance | TP: Regression line
+        </div>
+    </div>
+
+    <script>
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined) return '--';
+            return Number(num).toFixed(decimals);
+        }
+
+        function formatPrice(num) {
+            if (num === null || num === undefined) return '--';
+            return Number(num).toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        function updateDashboard() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Error handling
+                    const errorDiv = document.getElementById('error');
+                    if (data.error) {
+                        errorDiv.textContent = data.error;
+                        errorDiv.style.display = 'block';
+                    } else {
+                        errorDiv.style.display = 'none';
+                    }
+
+                    // Price
+                    document.getElementById('btc-price').textContent = formatPrice(data.btc_price);
+
+                    // Signal
+                    const signalBox = document.getElementById('signal-box');
+                    const signalText = document.getElementById('signal-text');
+                    const tradeLevels = document.getElementById('trade-levels');
+
+                    if (data.signal === 'ENTRY SIGNAL') {
+                        signalBox.className = 'signal-box signal-entry';
+                        signalText.textContent = 'ENTRY SIGNAL';
+                        tradeLevels.classList.add('active');
+
+                        document.getElementById('entry-price').textContent = formatPrice(data.entry_price);
+                        document.getElementById('stop-loss').textContent = formatPrice(data.stop_loss);
+                        document.getElementById('take-profit').textContent = formatPrice(data.take_profit);
+                    } else {
+                        signalBox.className = 'signal-box signal-waiting';
+                        signalText.textContent = 'WAITING';
+                        tradeLevels.classList.remove('active');
+                    }
+
+                    // R-squared with color
+                    const r2Element = document.getElementById('r-squared');
+                    const r2Value = data.r_squared;
+                    r2Element.textContent = formatNumber(r2Value, 4);
+                    r2Element.className = 'metric-value ' + (r2Value > 0.6 ? 'r2-good' : 'r2-bad');
+
+                    // Channel levels (as percentages)
+                    document.getElementById('channel-top').textContent = formatNumber(data.channel_top * 100, 2) + '%';
+                    document.getElementById('regression-line').textContent = formatNumber(data.regression_line * 100, 2) + '%';
+                    document.getElementById('entry-threshold').textContent = formatNumber(data.entry_threshold * 100, 2) + '%';
+                    document.getElementById('channel-bottom').textContent = formatNumber(data.channel_bottom * 100, 2) + '%';
+                    document.getElementById('cumulative-return').textContent = formatNumber(data.cumulative_return * 100, 2) + '%';
+
+                    // Last update
+                    document.getElementById('last-update').textContent = data.last_update || '--';
+                })
+                .catch(error => {
+                    console.error('Error fetching status:', error);
+                    document.getElementById('error').textContent = 'Connection error';
+                    document.getElementById('error').style.display = 'block';
+                });
+        }
+
+        // Initial update
+        updateDashboard();
+
+        // Auto-refresh every 30 seconds
+        setInterval(updateDashboard, 30000);
+    </script>
+</body>
+</html>
