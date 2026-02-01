@@ -175,16 +175,21 @@ def health():
     return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat()})
 
 # =============================================================================
-# MAIN
+# STARTUP - runs when gunicorn loads the app
 # =============================================================================
-if __name__ == '__main__':
-    # Start background update thread
-    update_thread = threading.Thread(target=update_loop, daemon=True)
-    update_thread.start()
+# Start background update thread
+update_thread = threading.Thread(target=update_loop, daemon=True)
+update_thread.start()
 
-    # Initial update
+# Initial update
+try:
     df = fetch_btc_data()
     calculate_signals(df)
+except Exception as e:
+    print(f"Initial fetch error: {e}")
 
-    # Run Flask
+# =============================================================================
+# MAIN - for local development only
+# =============================================================================
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)
