@@ -145,6 +145,15 @@
             margin-bottom: 15px;
         }
 
+        .loading {
+            background: #3498db;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
         .strategy-info {
             font-size: 0.75em;
             color: #7f8c8d;
@@ -153,16 +162,96 @@
             padding: 10px;
             border-top: 1px solid #2c3e50;
         }
+
+        .refresh-btn {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.1em;
+            font-weight: bold;
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            margin-bottom: 15px;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.98);
+        }
+
+        .refresh-btn:disabled {
+            background: #7f8c8d;
+            cursor: not-allowed;
+        }
+
+        .position-calc {
+            background: #0f3460;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .position-calc input {
+            width: 100%;
+            padding: 12px;
+            font-size: 1.1em;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            background: #1a1a2e;
+            color: #fff;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .position-result {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+
+        .position-result .label {
+            color: #95a5a6;
+        }
+
+        .position-result .value {
+            font-weight: bold;
+            color: #2ecc71;
+        }
+
+        .position-result .value.warn {
+            color: #f39c12;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>BTC Linear Regression</h1>
 
+        <button id="refresh-btn" class="refresh-btn" onclick="refreshData()">REFRESH DATA</button>
+
+        <div id="loading" class="loading">Loading data... Please wait.</div>
         <div id="error" class="error" style="display: none;"></div>
 
         <div id="signal-box" class="signal-box signal-waiting">
             <span id="signal-text">WAITING</span>
+        </div>
+
+        <div class="position-calc">
+            <div class="card-title">Position Calculator (1% Max Loss)</div>
+            <input type="number" id="account-size" placeholder="Enter Account Size ($)" oninput="calculatePosition()">
+            <div class="position-result">
+                <span class="label">Stop Distance</span>
+                <span class="value" id="stop-distance">--%</span>
+            </div>
+            <div class="position-result">
+                <span class="label">Position Size</span>
+                <span class="value" id="position-size">$--</span>
+            </div>
+            <div class="position-result">
+                <span class="label">Max Loss (1%)</span>
+                <span class="value warn" id="max-loss">$--</span>
+            </div>
         </div>
 
         <div class="card">
@@ -220,7 +309,6 @@
 
         <div class="update-time">
             Last updated: <span id="last-update">--</span>
-            <br>Auto-refresh: 30 seconds
         </div>
 
         <div class="strategy-info">
@@ -246,6 +334,9 @@
             fetch('/api/status')
                 .then(response => response.json())
                 .then(data => {
+                    // Hide loading message
+                    document.getElementById('loading').style.display = 'none';
+
                     // Error handling
                     const errorDiv = document.getElementById('error');
                     if (data.error) {
@@ -271,10 +362,20 @@
                         document.getElementById('entry-price').textContent = formatPrice(data.entry_price);
                         document.getElementById('stop-loss').textContent = formatPrice(data.stop_loss);
                         document.getElementById('take-profit').textContent = formatPrice(data.take_profit);
+
+                        // Store for position calculation
+                        currentEntry = data.entry_price;
+                        currentStopLoss = data.stop_loss;
+                        calculatePosition();
                     } else {
                         signalBox.className = 'signal-box signal-waiting';
                         signalText.textContent = 'WAITING';
                         tradeLevels.classList.remove('active');
+
+                        // Clear position calc when no signal
+                        currentEntry = null;
+                        currentStopLoss = null;
+                        calculatePosition();
                     }
 
                     // R-squared with color
@@ -283,12 +384,12 @@
                     r2Element.textContent = formatNumber(r2Value, 4);
                     r2Element.className = 'metric-value ' + (r2Value > 0.6 ? 'r2-good' : 'r2-bad');
 
-                    // Channel levels (as percentages)
-                    document.getElementById('channel-top').textContent = formatNumber(data.channel_top * 100, 2) + '%';
-                    document.getElementById('regression-line').textContent = formatNumber(data.regression_line * 100, 2) + '%';
-                    document.getElementById('entry-threshold').textContent = formatNumber(data.entry_threshold * 100, 2) + '%';
-                    document.getElementById('channel-bottom').textContent = formatNumber(data.channel_bottom * 100, 2) + '%';
-                    document.getElementById('cumulative-return').textContent = formatNumber(data.cumulative_return * 100, 2) + '%';
+                    // Channel levels (as prices)
+                    document.getElementById('channel-top').textContent = '$' + formatPrice(data.channel_top_price);
+                    document.getElementById('regression-line').textContent = '$' + formatPrice(data.regression_line_price);
+                    document.getElementById('entry-threshold').textContent = '$' + formatPrice(data.entry_threshold_price);
+                    document.getElementById('channel-bottom').textContent = '$' + formatPrice(data.channel_bottom_price);
+                    document.getElementById('cumulative-return').textContent = '$' + formatPrice(data.current_position_price);
 
                     // Last update
                     document.getElementById('last-update').textContent = data.last_update || '--';
@@ -300,11 +401,61 @@
                 });
         }
 
-        // Initial update
-        updateDashboard();
+        // Store current trade data for position calculation
+        let currentEntry = null;
+        let currentStopLoss = null;
 
-        // Auto-refresh every 30 seconds
-        setInterval(updateDashboard, 30000);
+        function calculatePosition() {
+            const accountSize = parseFloat(document.getElementById('account-size').value) || 0;
+            const maxLossPct = 0.01;   // 1% max loss
+            const maxLossAmount = accountSize * maxLossPct;
+
+            if (currentEntry && currentStopLoss && currentEntry > 0) {
+                // Calculate stop loss distance as percentage
+                const stopDistancePct = (currentEntry - currentStopLoss) / currentEntry;
+
+                // Position size = max loss amount / stop loss percentage
+                const positionSize = stopDistancePct > 0 ? maxLossAmount / stopDistancePct : 0;
+
+                document.getElementById('position-size').textContent = '$' + positionSize.toLocaleString('en-US', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0
+                });
+                document.getElementById('stop-distance').textContent = (stopDistancePct * 100).toFixed(2) + '%';
+            } else {
+                document.getElementById('position-size').textContent = '$--';
+                document.getElementById('stop-distance').textContent = '--%';
+            }
+
+            document.getElementById('max-loss').textContent = '$' + maxLossAmount.toLocaleString('en-US', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            });
+        }
+
+        function refreshData() {
+            const btn = document.getElementById('refresh-btn');
+            btn.disabled = true;
+            btn.textContent = 'REFRESHING...';
+
+            // Call backend to fetch fresh data
+            fetch('/api/refresh', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    updateDashboard();
+                    btn.textContent = 'REFRESH DATA';
+                    btn.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Refresh error:', error);
+                    btn.textContent = 'REFRESH DATA';
+                    btn.disabled = false;
+                    updateDashboard();
+                });
+        }
+
+        // Initial update on page load
+        updateDashboard();
     </script>
 </body>
 </html>

@@ -41,6 +41,11 @@ current_state = {
     'stop_loss': None,
     'take_profit': None,
     'error': None,
+    'channel_top_price': None,
+    'channel_bottom_price': None,
+    'regression_line_price': None,
+    'entry_threshold_price': None,
+    'current_position_price': None,
 }
 
 # Store historical data
@@ -110,6 +115,9 @@ def calculate_signals(df):
         current_cumret = df['cumulative_return'].iloc[-1]
         r_squared = r_value ** 2
 
+        # Calculate base price for converting returns to prices
+        base_price = current_price / (1 + current_cumret) if current_cumret != -1 else current_price
+
         # Update state
         current_state['last_update'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         current_state['btc_price'] = float(current_price)
@@ -120,6 +128,13 @@ def calculate_signals(df):
         current_state['entry_threshold'] = float(entry_threshold)
         current_state['r_squared'] = float(r_squared)
         current_state['error'] = None
+
+        # Add price levels for display
+        current_state['channel_top_price'] = float(base_price * (1 + channel_top))
+        current_state['channel_bottom_price'] = float(base_price * (1 + channel_bottom))
+        current_state['regression_line_price'] = float(base_price * (1 + regression_value))
+        current_state['entry_threshold_price'] = float(base_price * (1 + entry_threshold))
+        current_state['current_position_price'] = float(current_price)
 
         # Check entry conditions
         if r_squared > R2_THRESHOLD and current_cumret <= entry_threshold:
@@ -173,6 +188,16 @@ def api_status():
 @app.route('/api/health')
 def health():
     return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat()})
+
+@app.route('/api/refresh', methods=['POST'])
+def refresh():
+    """Manually trigger data refresh."""
+    try:
+        df = fetch_btc_data()
+        calculate_signals(df)
+        return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat()})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # =============================================================================
 # STARTUP - runs when gunicorn loads the app
