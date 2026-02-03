@@ -2,6 +2,7 @@
 BTC Linear Regression Strategy - Live Dashboard
 ================================================
 Flask web app for monitoring entry signals on mobile.
+Supports both LONG and SHORT signals.
 """
 
 import ccxt
@@ -34,9 +35,11 @@ current_state = {
     'regression_line': None,
     'channel_top': None,
     'channel_bottom': None,
-    'entry_threshold': None,
+    'long_entry_threshold': None,
+    'short_entry_threshold': None,
     'r_squared': None,
     'signal': 'WAITING',
+    'signal_direction': None,  # 'LONG' or 'SHORT'
     'entry_price': None,
     'stop_loss': None,
     'take_profit': None,
@@ -44,7 +47,8 @@ current_state = {
     'channel_top_price': None,
     'channel_bottom_price': None,
     'regression_line_price': None,
-    'entry_threshold_price': None,
+    'long_entry_threshold_price': None,
+    'short_entry_threshold_price': None,
     'current_position_price': None,
 }
 
@@ -73,7 +77,7 @@ def fetch_btc_data():
         return None
 
 def calculate_signals(df):
-    """Calculate regression channel and check for entry signals."""
+    """Calculate regression channel and check for entry signals (LONG and SHORT)."""
     global current_state
 
     if df is None or len(df) < LOOKBACK_PERIOD + 1:
@@ -107,8 +111,11 @@ def calculate_signals(df):
         channel_top = regression_value + max_residual
         channel_bottom = regression_value + min_residual
 
-        # Entry threshold (50% toward bottom)
-        entry_threshold = regression_value - ENTRY_THRESHOLD_PCT * (regression_value - channel_bottom)
+        # LONG entry threshold (50% toward bottom)
+        long_entry_threshold = regression_value - ENTRY_THRESHOLD_PCT * (regression_value - channel_bottom)
+
+        # SHORT entry threshold (50% toward top)
+        short_entry_threshold = regression_value + ENTRY_THRESHOLD_PCT * (channel_top - regression_value)
 
         # Current values
         current_price = df['close'].iloc[-1]
@@ -125,7 +132,8 @@ def calculate_signals(df):
         current_state['regression_line'] = float(regression_value)
         current_state['channel_top'] = float(channel_top)
         current_state['channel_bottom'] = float(channel_bottom)
-        current_state['entry_threshold'] = float(entry_threshold)
+        current_state['long_entry_threshold'] = float(long_entry_threshold)
+        current_state['short_entry_threshold'] = float(short_entry_threshold)
         current_state['r_squared'] = float(r_squared)
         current_state['error'] = None
 
@@ -133,27 +141,41 @@ def calculate_signals(df):
         current_state['channel_top_price'] = float(base_price * (1 + channel_top))
         current_state['channel_bottom_price'] = float(base_price * (1 + channel_bottom))
         current_state['regression_line_price'] = float(base_price * (1 + regression_value))
-        current_state['entry_threshold_price'] = float(base_price * (1 + entry_threshold))
+        current_state['long_entry_threshold_price'] = float(base_price * (1 + long_entry_threshold))
+        current_state['short_entry_threshold_price'] = float(base_price * (1 + short_entry_threshold))
         current_state['current_position_price'] = float(current_price)
 
-        # Check entry conditions
-        if r_squared > R2_THRESHOLD and current_cumret <= entry_threshold:
-            current_state['signal'] = 'ENTRY SIGNAL'
+        # Check LONG entry conditions (price near bottom)
+        if r_squared > R2_THRESHOLD and current_cumret <= long_entry_threshold:
+            current_state['signal'] = 'LONG SIGNAL'
+            current_state['signal_direction'] = 'LONG'
 
-            # Calculate SL and TP
+            # Calculate SL and TP for LONG
             stop_distance = current_cumret - channel_bottom
             stop_loss_cumret = current_cumret - (stop_distance * STOP_MULTIPLIER)
             take_profit_cumret = regression_value
 
-            # Convert to approximate price levels
-            # This is approximate - for display purposes
-            price_per_return = current_price / (1 + current_cumret) if current_cumret != 0 else current_price
+            current_state['entry_price'] = float(current_price)
+            current_state['stop_loss'] = float(current_price * (1 + stop_loss_cumret - current_cumret))
+            current_state['take_profit'] = float(current_price * (1 + take_profit_cumret - current_cumret))
+
+        # Check SHORT entry conditions (price near top)
+        elif r_squared > R2_THRESHOLD and current_cumret >= short_entry_threshold:
+            current_state['signal'] = 'SHORT SIGNAL'
+            current_state['signal_direction'] = 'SHORT'
+
+            # Calculate SL and TP for SHORT
+            stop_distance = channel_top - current_cumret
+            stop_loss_cumret = current_cumret + (stop_distance * STOP_MULTIPLIER)
+            take_profit_cumret = regression_value
 
             current_state['entry_price'] = float(current_price)
             current_state['stop_loss'] = float(current_price * (1 + stop_loss_cumret - current_cumret))
             current_state['take_profit'] = float(current_price * (1 + take_profit_cumret - current_cumret))
+
         else:
             current_state['signal'] = 'WAITING'
+            current_state['signal_direction'] = None
             current_state['entry_price'] = None
             current_state['stop_loss'] = None
             current_state['take_profit'] = None

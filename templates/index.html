@@ -45,9 +45,15 @@
             border: 2px solid #7f8c8d;
         }
 
-        .signal-entry {
+        .signal-long {
             background: linear-gradient(135deg, #27ae60, #2ecc71);
             border: 2px solid #27ae60;
+            animation: pulse 1.5s infinite;
+        }
+
+        .signal-short {
+            background: linear-gradient(135deg, #c0392b, #e74c3c);
+            border: 2px solid #c0392b;
             animation: pulse 1.5s infinite;
         }
 
@@ -290,12 +296,16 @@
                 <span class="metric-value" id="channel-top">--</span>
             </div>
             <div class="metric-row">
+                <span class="metric-label" style="color: #e74c3c;">Short Entry (50%)</span>
+                <span class="metric-value" id="short-entry-threshold" style="color: #e74c3c;">--</span>
+            </div>
+            <div class="metric-row">
                 <span class="metric-label">Regression Line</span>
                 <span class="metric-value" id="regression-line">--</span>
             </div>
             <div class="metric-row">
-                <span class="metric-label">Entry Threshold</span>
-                <span class="metric-value" id="entry-threshold">--</span>
+                <span class="metric-label" style="color: #2ecc71;">Long Entry (50%)</span>
+                <span class="metric-value" id="long-entry-threshold" style="color: #2ecc71;">--</span>
             </div>
             <div class="metric-row">
                 <span class="metric-label">Channel Bottom</span>
@@ -312,7 +322,7 @@
         </div>
 
         <div class="strategy-info">
-            Strategy: 100-period lookback | Entry: 50% to bottom | SL: 2x distance | TP: Regression line
+            Strategy: 100-period lookback | LONG: 50% to bottom | SHORT: 50% to top | SL: 2x distance | TP: Regression line
         </div>
     </div>
 
@@ -354,9 +364,9 @@
                     const signalText = document.getElementById('signal-text');
                     const tradeLevels = document.getElementById('trade-levels');
 
-                    if (data.signal === 'ENTRY SIGNAL') {
-                        signalBox.className = 'signal-box signal-entry';
-                        signalText.textContent = 'ENTRY SIGNAL';
+                    if (data.signal === 'LONG SIGNAL') {
+                        signalBox.className = 'signal-box signal-long';
+                        signalText.textContent = 'LONG SIGNAL';
                         tradeLevels.classList.add('active');
 
                         document.getElementById('entry-price').textContent = formatPrice(data.entry_price);
@@ -366,6 +376,21 @@
                         // Store for position calculation
                         currentEntry = data.entry_price;
                         currentStopLoss = data.stop_loss;
+                        currentDirection = 'LONG';
+                        calculatePosition();
+                    } else if (data.signal === 'SHORT SIGNAL') {
+                        signalBox.className = 'signal-box signal-short';
+                        signalText.textContent = 'SHORT SIGNAL';
+                        tradeLevels.classList.add('active');
+
+                        document.getElementById('entry-price').textContent = formatPrice(data.entry_price);
+                        document.getElementById('stop-loss').textContent = formatPrice(data.stop_loss);
+                        document.getElementById('take-profit').textContent = formatPrice(data.take_profit);
+
+                        // Store for position calculation (for shorts, SL is above entry)
+                        currentEntry = data.entry_price;
+                        currentStopLoss = data.stop_loss;
+                        currentDirection = 'SHORT';
                         calculatePosition();
                     } else {
                         signalBox.className = 'signal-box signal-waiting';
@@ -375,6 +400,7 @@
                         // Clear position calc when no signal
                         currentEntry = null;
                         currentStopLoss = null;
+                        currentDirection = null;
                         calculatePosition();
                     }
 
@@ -386,8 +412,9 @@
 
                     // Channel levels (as prices)
                     document.getElementById('channel-top').textContent = '$' + formatPrice(data.channel_top_price);
+                    document.getElementById('short-entry-threshold').textContent = '$' + formatPrice(data.short_entry_threshold_price);
                     document.getElementById('regression-line').textContent = '$' + formatPrice(data.regression_line_price);
-                    document.getElementById('entry-threshold').textContent = '$' + formatPrice(data.entry_threshold_price);
+                    document.getElementById('long-entry-threshold').textContent = '$' + formatPrice(data.long_entry_threshold_price);
                     document.getElementById('channel-bottom').textContent = '$' + formatPrice(data.channel_bottom_price);
                     document.getElementById('cumulative-return').textContent = '$' + formatPrice(data.current_position_price);
 
@@ -404,6 +431,7 @@
         // Store current trade data for position calculation
         let currentEntry = null;
         let currentStopLoss = null;
+        let currentDirection = null;
 
         function calculatePosition() {
             const accountSize = parseFloat(document.getElementById('account-size').value) || 0;
@@ -411,8 +439,15 @@
             const maxLossAmount = accountSize * maxLossPct;
 
             if (currentEntry && currentStopLoss && currentEntry > 0) {
-                // Calculate stop loss distance as percentage
-                const stopDistancePct = (currentEntry - currentStopLoss) / currentEntry;
+                // Calculate stop loss distance as percentage (absolute value)
+                let stopDistancePct;
+                if (currentDirection === 'LONG') {
+                    // For longs, SL is below entry
+                    stopDistancePct = (currentEntry - currentStopLoss) / currentEntry;
+                } else {
+                    // For shorts, SL is above entry
+                    stopDistancePct = (currentStopLoss - currentEntry) / currentEntry;
+                }
 
                 // Position size = max loss amount / stop loss percentage
                 const positionSize = stopDistancePct > 0 ? maxLossAmount / stopDistancePct : 0;
